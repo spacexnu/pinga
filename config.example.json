@@ -1,0 +1,19 @@
+{
+  "url": "https://api.example.com/users/{id}",
+  "method": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "X-Trace-Id": "abc-123"
+  },
+  "path_params": {
+    "id": "42"
+  },
+  "query_params": {
+    "verbose": "true",
+    "limit": "10"
+  },
+  "payload": {
+    "name": "Ada",
+    "role": "admin"
+  }
+}

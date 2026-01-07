@@ -1,0 +1,14 @@
+{
+  "url": "https://httpbin.org/anything/{id}",
+  "method": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "path_params": {
+    "id": "42"
+  },
+  "query_params": {
+    "demo": "true"
+  },
+  "payload_file": "payload.example.json"
+}
