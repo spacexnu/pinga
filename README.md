@@ -45,6 +45,59 @@ Or:
 make build
 ```
 
+## Dependencies
+
+Build/run requirements:
+
+- C toolchain (compiler + make)
+- CMake >= 3.20
+- libcurl development headers
+- Python 3 (only for tests)
+
+Optional:
+
+- jq (pretty-print JSON output)
+
+Ubuntu example (includes optional `jq`):
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake libcurl4-openssl-dev python3 jq
+```
+
+macOS example (includes optional `jq`):
+
+```bash
+xcode-select --install
+brew install cmake
+brew install curl
+brew install jq
+```
+
+## Releases and checksums
+
+Release assets include per-file `.sha256` checksums and a combined `checksums.txt`.
+Verifying checksums helps confirm integrity (no corruption) and authenticity (the file matches what was published).
+
+macOS/Linux:
+
+```bash
+shasum -a 256 pinga-linux.tar.gz
+cat checksums.txt | grep pinga-linux.tar.gz
+```
+
+Alternative (Linux):
+
+```bash
+sha256sum pinga-linux.tar.gz
+```
+
+Windows (PowerShell):
+
+```powershell
+certutil -hashfile pinga-windows.zip SHA256
+```
+
 ## Usage
 
 ```bash
