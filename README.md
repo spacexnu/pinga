@@ -13,7 +13,8 @@ Pinga is Brazilian slang for cachaça: cheap, fast, and effective.
 This CLI shares the same philosophy.
 No UI. No workspaces. No nonsense.
 
-_I’d rather take shots of pinga than open heavy tools like Postman._
+_And honestly?
+I’d rather drink a lot of pinga than open heavy tools like Postman._
 
 ## Features
 
