@@ -59,7 +59,14 @@ jobs:
 
       - name: Configure (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="dev"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DPINGA_VERSION="${version}"
 
       - name: Build (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -68,7 +75,13 @@ jobs:
       - name: Configure (Windows)
         if: matrix.os == 'windows-latest'
         shell: msys2 {0}
-        run: cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: |
+          set -euo pipefail
+          version="dev"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DPINGA_VERSION="${version}"
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'

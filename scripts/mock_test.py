@@ -57,7 +57,7 @@ def run():
         tmp_path = tmp.name
 
     try:
-        cmd = ["./build/pinga", tmp_path]
+        cmd = ["./build/pinga", "--exclude-response-headers", tmp_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise SystemExit(result.stderr.strip() or "pinga failed")

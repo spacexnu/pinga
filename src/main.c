@@ -6,8 +6,13 @@
 
 #include "jsmn.h"
 
+static int ensure_tokens(jsmn_parser *parser, const char *json, size_t len,
+                         jsmntok_t **tokens_out, int *count_out);
+
 static void print_usage(const char *prog) {
-  fprintf(stderr, "Usage: %s [--silent] <config.json>\n", prog);
+  fprintf(stderr,
+          "Usage: %s [--silent] [--exclude-response-headers] [--version] <config.json>\n",
+          prog);
 }
 
 static char *read_file(const char *path, size_t *out_len) {
@@ -120,6 +125,16 @@ static char *dup_token_raw(const char *json, const jsmntok_t *tok) {
   }
   memcpy(out, json + tok->start, len);
   out[len] = '\0';
+  return out;
+}
+
+static char *dup_string(const char *src) {
+  size_t len = strlen(src);
+  char *out = (char *)malloc(len + 1);
+  if (!out) {
+    return NULL;
+  }
+  memcpy(out, src, len + 1);
   return out;
 }
 
@@ -281,6 +296,242 @@ static size_t write_discard(void *ptr, size_t size, size_t nmemb, void *userdata
   return size * nmemb;
 }
 
+struct response_buffer {
+  char *data;
+  size_t len;
+};
+
+static size_t write_buffer(void *ptr, size_t size, size_t nmemb, void *userdata) {
+  struct response_buffer *buf = (struct response_buffer *)userdata;
+  size_t total = size * nmemb;
+  char *next = (char *)realloc(buf->data, buf->len + total + 1);
+  if (!next) {
+    return 0;
+  }
+  memcpy(next + buf->len, ptr, total);
+  buf->data = next;
+  buf->len += total;
+  buf->data[buf->len] = '\0';
+  return total;
+}
+
+struct header_entry {
+  char *name;
+  char *value;
+};
+
+struct header_list {
+  struct header_entry *items;
+  size_t count;
+  size_t cap;
+};
+
+struct response_headers {
+  struct header_list headers;
+  char *status_line;
+};
+
+static void header_list_free(struct header_list *list) {
+  for (size_t i = 0; i < list->count; i++) {
+    free(list->items[i].name);
+    free(list->items[i].value);
+  }
+  free(list->items);
+  list->items = NULL;
+  list->count = 0;
+  list->cap = 0;
+}
+
+static int header_list_append(struct header_list *list, const char *name, const char *value) {
+  if (list->count == list->cap) {
+    size_t next_cap = list->cap == 0 ? 8 : list->cap * 2;
+    struct header_entry *next = (struct header_entry *)realloc(
+        list->items, next_cap * sizeof(struct header_entry));
+    if (!next) {
+      return -1;
+    }
+    list->items = next;
+    list->cap = next_cap;
+  }
+  list->items[list->count].name = dup_string(name);
+  list->items[list->count].value = dup_string(value);
+  if (!list->items[list->count].name || !list->items[list->count].value) {
+    free(list->items[list->count].name);
+    free(list->items[list->count].value);
+    return -1;
+  }
+  list->count++;
+  return 0;
+}
+
+static void trim_whitespace(char *str) {
+  char *end = str + strlen(str);
+  while (end > str && (*(end - 1) == ' ' || *(end - 1) == '\t')) {
+    end--;
+  }
+  *end = '\0';
+  while (*str == ' ' || *str == '\t') {
+    memmove(str, str + 1, strlen(str));
+  }
+}
+
+static size_t write_header(void *ptr, size_t size, size_t nmemb, void *userdata) {
+  struct response_headers *resp = (struct response_headers *)userdata;
+  size_t total = size * nmemb;
+  char *line = (char *)malloc(total + 1);
+  if (!line) {
+    return 0;
+  }
+  memcpy(line, ptr, total);
+  line[total] = '\0';
+  while (total > 0 && (line[total - 1] == '\n' || line[total - 1] == '\r')) {
+    line[--total] = '\0';
+  }
+  if (total == 0) {
+    free(line);
+    return size * nmemb;
+  }
+  if (strncmp(line, "HTTP/", 5) == 0) {
+    free(resp->status_line);
+    resp->status_line = dup_string(line);
+    free(line);
+    return size * nmemb;
+  }
+  char *colon = strchr(line, ':');
+  if (!colon) {
+    free(line);
+    return size * nmemb;
+  }
+  *colon = '\0';
+  char *name = line;
+  char *value = colon + 1;
+  while (*value == ' ' || *value == '\t') {
+    value++;
+  }
+  trim_whitespace(name);
+  trim_whitespace(value);
+  header_list_append(&resp->headers, name, value);
+  free(line);
+  return size * nmemb;
+}
+
+static char *json_escape(const char *src) {
+  size_t len = 0;
+  for (const unsigned char *p = (const unsigned char *)src; *p; p++) {
+    switch (*p) {
+      case '\\':
+      case '"':
+      case '\b':
+      case '\f':
+      case '\n':
+      case '\r':
+      case '\t':
+        len += 2;
+        break;
+      default:
+        len += (*p < 0x20) ? 6 : 1;
+    }
+  }
+  char *out = (char *)malloc(len + 1);
+  if (!out) {
+    return NULL;
+  }
+  char *dst = out;
+  for (const unsigned char *p = (const unsigned char *)src; *p; p++) {
+    switch (*p) {
+      case '\\':
+        *dst++ = '\\';
+        *dst++ = '\\';
+        break;
+      case '"':
+        *dst++ = '\\';
+        *dst++ = '"';
+        break;
+      case '\b':
+        *dst++ = '\\';
+        *dst++ = 'b';
+        break;
+      case '\f':
+        *dst++ = '\\';
+        *dst++ = 'f';
+        break;
+      case '\n':
+        *dst++ = '\\';
+        *dst++ = 'n';
+        break;
+      case '\r':
+        *dst++ = '\\';
+        *dst++ = 'r';
+        break;
+      case '\t':
+        *dst++ = '\\';
+        *dst++ = 't';
+        break;
+      default:
+        if (*p < 0x20) {
+          snprintf(dst, 7, "\\u%04x", *p);
+          dst += 6;
+        } else {
+          *dst++ = (char)*p;
+        }
+    }
+  }
+  *dst = '\0';
+  return out;
+}
+
+static bool is_valid_json(const char *json, size_t len) {
+  jsmn_parser parser;
+  jsmntok_t *tokens = NULL;
+  int tok_count = 0;
+  if (ensure_tokens(&parser, json, len, &tokens, &tok_count) != 0) {
+    return false;
+  }
+  bool ok = tok_count > 0;
+  free(tokens);
+  return ok;
+}
+
+static void print_json_response(long status, const char *status_line,
+                                const struct header_list *headers,
+                                const struct response_buffer *body) {
+  const char *status_src = status_line ? status_line : "";
+  char *status_esc = json_escape(status_src);
+  if (!status_esc) {
+    return;
+  }
+  printf("{\"status\":%ld,\"status_text\":\"%s\",\"headers\":[", status, status_esc);
+  free(status_esc);
+  for (size_t i = 0; i < headers->count; i++) {
+    char *name_esc = json_escape(headers->items[i].name);
+    char *value_esc = json_escape(headers->items[i].value);
+    if (!name_esc || !value_esc) {
+      free(name_esc);
+      free(value_esc);
+      return;
+    }
+    if (i > 0) {
+      fputc(',', stdout);
+    }
+    printf("{\"name\":\"%s\",\"value\":\"%s\"}", name_esc, value_esc);
+    free(name_esc);
+    free(value_esc);
+  }
+  printf("],\"body\":");
+  if (body && body->data && body->len > 0 && is_valid_json(body->data, body->len)) {
+    fwrite(body->data, 1, body->len, stdout);
+  } else {
+    const char *body_src = body && body->data ? body->data : "";
+    char *body_esc = json_escape(body_src);
+    if (!body_esc) {
+      return;
+    }
+    printf("\"%s\"", body_esc);
+    free(body_esc);
+  }
+  printf("}\n");
+}
+
 struct curl_ctx {
   CURL *curl;
   char **url;
@@ -370,10 +621,19 @@ static void print_parse_error(void) {
 
 int main(int argc, char **argv) {
   bool use_exit_codes = false;
+  bool include_headers = true;
   const char *config_path = NULL;
   for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--version") == 0) {
+      printf("pinga %s\n", PINGA_VERSION);
+      return 0;
+    }
     if (strcmp(argv[i], "--silent") == 0) {
       use_exit_codes = true;
+      continue;
+    }
+    if (strcmp(argv[i], "--exclude-response-headers") == 0) {
+      include_headers = false;
       continue;
     }
     if (argv[i][0] == '-') {
@@ -580,10 +840,18 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  struct response_buffer body = {0};
+  struct response_headers resp_headers = {0};
+
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  if (use_exit_codes) {
+  if (!use_exit_codes && include_headers) {
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_header);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp_headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_buffer);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+  } else if (use_exit_codes) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_discard);
   } else {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_stdout);
@@ -604,9 +872,17 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\nRequest failed: %s\n", curl_easy_strerror(res));
   }
 
+  if (!use_exit_codes && include_headers && res == CURLE_OK) {
+    print_json_response(http_status, resp_headers.status_line, &resp_headers.headers,
+                        &body);
+  }
+
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   curl_global_cleanup();
+  free(body.data);
+  header_list_free(&resp_headers.headers);
+  free(resp_headers.status_line);
   free(method);
   free(payload);
   free(url);
