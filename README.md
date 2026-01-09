@@ -22,7 +22,9 @@ I’d rather drink a lot of pinga than open heavy tools like Postman._
 - Supports method, headers, query params, path params, and body
 - `payload` can be a string or any JSON value
 - `payload_file` lets you send body from a file
-- Simple CLI output: prints response body to stdout (pipe to `jq` for pretty JSON)
+- JSON output: prints `status`, `headers`, and `body` (valid JSON for `jq`)
+- `--exclude-response-headers` prints only the raw response body
+- `--version` prints the CLI version
 
 ## Quick start
 
@@ -43,6 +45,34 @@ Or:
 
 ```bash
 make build
+```
+
+Install:
+
+```bash
+make install
+```
+
+Default install location is `~/.local/bin` when it exists; otherwise it falls back to `/usr/local` (sudo may be required).
+
+Custom prefix:
+
+```bash
+make install PREFIX=/opt/pinga
+```
+
+Version:
+
+```bash
+./build/pinga --version
+```
+
+Release builds use the Git tag (e.g. `v1.2.3`) as the reported version.
+
+Uninstall:
+
+```bash
+make uninstall
 ```
 
 ## Dependencies
@@ -108,6 +138,12 @@ Pretty-print JSON output:
 
 ```bash
 ./build/pinga config.json | jq
+```
+
+Exclude response headers:
+
+```bash
+./build/pinga --exclude-response-headers config.json
 ```
 
 Exit codes (with `--silent`, suppresses response body output):

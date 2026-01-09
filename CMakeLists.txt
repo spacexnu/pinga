@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(pinga C)
+project(pinga LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -12,8 +12,13 @@ add_executable(pinga
   src/jsmn.c
 )
 
+set(PINGA_VERSION "dev" CACHE STRING "Version string")
+
 target_compile_options(pinga PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(pinga PRIVATE CURL::libcurl)
+target_compile_definitions(pinga PRIVATE PINGA_VERSION="${PINGA_VERSION}")
+
+install(TARGETS pinga RUNTIME DESTINATION bin)
 
 enable_testing()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
