@@ -6,6 +6,14 @@
 
 #include "jsmn.h"
 
+enum {
+  EXIT_OK = 0,
+  EXIT_CONFIG = 64,
+  EXIT_REQUEST = 65,
+  EXIT_HTTP = 66,
+  EXIT_RESPONSE = 67
+};
+
 static int ensure_tokens(jsmn_parser *parser, const char *json, size_t len,
                          jsmntok_t **tokens_out, int *count_out);
 
@@ -626,7 +634,7 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--version") == 0) {
       printf("pinga %s\n", PINGA_VERSION);
-      return 0;
+      return EXIT_OK;
     }
     if (strcmp(argv[i], "--silent") == 0) {
       use_exit_codes = true;
@@ -638,25 +646,25 @@ int main(int argc, char **argv) {
     }
     if (argv[i][0] == '-') {
       print_usage(argv[0]);
-      return 1;
+      return EXIT_REQUEST;
     }
     if (config_path) {
       print_usage(argv[0]);
-      return 1;
+      return EXIT_REQUEST;
     }
     config_path = argv[i];
   }
 
   if (!config_path) {
     print_usage(argv[0]);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   size_t json_len = 0;
   char *json = read_file(config_path, &json_len);
   if (!json) {
     fprintf(stderr, "Failed to read file: %s\n", config_path);
-    return 1;
+    return EXIT_CONFIG;
   }
 
   jsmn_parser parser;
@@ -665,14 +673,14 @@ int main(int argc, char **argv) {
   if (ensure_tokens(&parser, json, json_len, &tokens, &tok_count) != 0) {
     free(json);
     print_parse_error();
-    return 1;
+    return EXIT_CONFIG;
   }
 
   if (tok_count < 1 || tokens[0].type != JSMN_OBJECT) {
     free(tokens);
     free(json);
     print_parse_error();
-    return 1;
+    return EXIT_CONFIG;
   }
 
   int url_idx = find_object_value(json, tokens, 0, "url");
@@ -680,14 +688,14 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Missing required field: url\n");
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
   char *url = dup_token_string(json, &tokens[url_idx]);
   if (!url) {
     fprintf(stderr, "Invalid url value.\n");
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   bool method_provided = false;
@@ -700,7 +708,7 @@ int main(int argc, char **argv) {
       free(url);
       free(tokens);
       free(json);
-      return 1;
+      return EXIT_REQUEST;
     }
     method_provided = true;
   }
@@ -719,7 +727,7 @@ int main(int argc, char **argv) {
       free(url);
       free(tokens);
       free(json);
-      return 1;
+      return EXIT_REQUEST;
     }
   }
 
@@ -732,7 +740,7 @@ int main(int argc, char **argv) {
       free(url);
       free(tokens);
       free(json);
-      return 1;
+      return EXIT_REQUEST;
     }
     char *payload_path = dup_token_string(json, &tokens[payload_file_idx]);
     if (!payload_path) {
@@ -741,7 +749,7 @@ int main(int argc, char **argv) {
       free(url);
       free(tokens);
       free(json);
-      return 1;
+      return EXIT_REQUEST;
     }
     size_t payload_len = 0;
     payload = read_file(payload_path, &payload_len);
@@ -752,7 +760,7 @@ int main(int argc, char **argv) {
       free(url);
       free(tokens);
       free(json);
-      return 1;
+      return EXIT_CONFIG;
     }
     free(payload_path);
   }
@@ -770,7 +778,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
@@ -780,7 +788,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_HTTP;
   }
 
   CURL *curl = curl_easy_init();
@@ -792,7 +800,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_HTTP;
   }
 
   bool has_query = strchr(url, '?') != NULL;
@@ -813,7 +821,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   int query_idx = find_object_value(json, tokens, 0, "query_params");
@@ -825,7 +833,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   int headers_idx = find_object_value(json, tokens, 0, "headers");
@@ -837,7 +845,7 @@ int main(int argc, char **argv) {
     free(url);
     free(tokens);
     free(json);
-    return 1;
+    return EXIT_REQUEST;
   }
 
   struct response_buffer body = {0};
@@ -890,13 +898,13 @@ int main(int argc, char **argv) {
   free(json);
 
   if (!use_exit_codes) {
-    return res == CURLE_OK ? 0 : 1;
+    return res == CURLE_OK ? EXIT_OK : EXIT_HTTP;
   }
   if (res != CURLE_OK) {
-    return 2;
+    return EXIT_HTTP;
   }
   if (http_status >= 400) {
-    return 3;
+    return EXIT_RESPONSE;
   }
-  return 0;
+  return EXIT_OK;
 }
