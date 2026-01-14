@@ -146,12 +146,20 @@ Exclude response headers:
 ./build/pinga --exclude-response-headers config.json
 ```
 
-Exit codes (with `--silent`, suppresses response body output):
+Exit codes:
 
-- `0` success (HTTP status < 400)
-- `1` config/JSON error
-- `2` network error
-- `3` HTTP error (>= 400)
+- `0` success
+- `64` invalid config / JSON parsing error
+- `65` invalid request definition or CLI usage
+- `66` HTTP request execution failure (network, TLS, DNS, etc.)
+- `67` response validation failed (HTTP status >= 400 when using `--silent`; reserved for `expected_status`)
+
+Config vs request errors:
+
+| Exit code | Examples |
+| --- | --- |
+| `64` | config file unreadable, invalid JSON, `payload_file` unreadable |
+| `65` | missing `url`, invalid field types, `payload` + `payload_file`, invalid CLI usage |
 
 Silent run (no response body output):
 
