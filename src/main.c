@@ -146,6 +146,97 @@ static char *dup_string(const char *src) {
   return out;
 }
 
+static bool parse_int_token(const char *json, const jsmntok_t *tok, long *out) {
+  if (tok->type != JSMN_PRIMITIVE) {
+    return false;
+  }
+  char *raw = dup_token_raw(json, tok);
+  if (!raw) {
+    return false;
+  }
+  char *end = NULL;
+  long val = strtol(raw, &end, 10);
+  bool ok = (end && *end == '\0' && end != raw && val >= 0);
+  if (ok) {
+    *out = val;
+  }
+  free(raw);
+  return ok;
+}
+
+static int parse_expected_status(const char *json, jsmntok_t *toks, int index,
+                                 long **out_values, size_t *out_count) {
+  if (index < 0) {
+    *out_values = NULL;
+    *out_count = 0;
+    return 0;
+  }
+  if (toks[index].type == JSMN_PRIMITIVE) {
+    long value = 0;
+    if (!parse_int_token(json, &toks[index], &value)) {
+      return -1;
+    }
+    long *values = (long *)malloc(sizeof(long));
+    if (!values) {
+      return -1;
+    }
+    values[0] = value;
+    *out_values = values;
+    *out_count = 1;
+    return 0;
+  }
+  if (toks[index].type == JSMN_ARRAY) {
+    int count = toks[index].size;
+    if (count <= 0) {
+      return -1;
+    }
+    long *values = (long *)calloc((size_t)count, sizeof(long));
+    if (!values) {
+      return -1;
+    }
+    int i = index + 1;
+    for (int e = 0; e < count; e++) {
+      if (!parse_int_token(json, &toks[i], &values[e])) {
+        free(values);
+        return -1;
+      }
+      i = skip_token(toks, i);
+    }
+    *out_values = values;
+    *out_count = (size_t)count;
+    return 0;
+  }
+  return -1;
+}
+
+static bool status_matches(long status, const long *expected, size_t count) {
+  for (size_t i = 0; i < count; i++) {
+    if (expected[i] == status) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void print_expected_status_error(const char *method, const char *url,
+                                        const long *expected, size_t count,
+                                        long actual) {
+  fprintf(stderr, "Expected status ");
+  if (count == 1) {
+    fprintf(stderr, "%ld", expected[0]);
+  } else {
+    fprintf(stderr, "[");
+    for (size_t i = 0; i < count; i++) {
+      if (i > 0) {
+        fprintf(stderr, ", ");
+      }
+      fprintf(stderr, "%ld", expected[i]);
+    }
+    fprintf(stderr, "]");
+  }
+  fprintf(stderr, " but got %ld for %s %s\n", actual, method, url);
+}
+
 typedef int (*kv_callback)(const char *name, const char *value, void *userdata);
 
 static const char *tok_type_name(jsmntype_t type) {
@@ -781,8 +872,28 @@ int main(int argc, char **argv) {
     return EXIT_REQUEST;
   }
 
+  long *expected_statuses = NULL;
+  size_t expected_status_count = 0;
+  bool expected_status_present = false;
+  int expected_status_idx = find_object_value(json, tokens, 0, "expected_status");
+  if (expected_status_idx >= 0) {
+    if (parse_expected_status(json, tokens, expected_status_idx,
+                              &expected_statuses, &expected_status_count) != 0) {
+      fprintf(stderr,
+              "Invalid expected_status: expected integer or array of integers.\n");
+      free(method);
+      free(payload);
+      free(url);
+      free(tokens);
+      free(json);
+      return EXIT_REQUEST;
+    }
+    expected_status_present = true;
+  }
+
   if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
     fprintf(stderr, "Failed to init curl globals.\n");
+    free(expected_statuses);
     free(method);
     free(payload);
     free(url);
@@ -795,6 +906,7 @@ int main(int argc, char **argv) {
   if (!curl) {
     fprintf(stderr, "Failed to init curl.\n");
     curl_global_cleanup();
+    free(expected_statuses);
     free(method);
     free(payload);
     free(url);
@@ -816,6 +928,7 @@ int main(int argc, char **argv) {
   if (iterate_kv(json, tokens, path_idx, "path_params", apply_path_param, &ctx) != 0) {
     curl_easy_cleanup(curl);
     curl_global_cleanup();
+    free(expected_statuses);
     free(method);
     free(payload);
     free(url);
@@ -828,6 +941,7 @@ int main(int argc, char **argv) {
   if (iterate_kv(json, tokens, query_idx, "query_params", apply_query_param, &ctx) != 0) {
     curl_easy_cleanup(curl);
     curl_global_cleanup();
+    free(expected_statuses);
     free(method);
     free(payload);
     free(url);
@@ -840,6 +954,7 @@ int main(int argc, char **argv) {
   if (iterate_kv(json, tokens, headers_idx, "headers", apply_header, &ctx) != 0) {
     curl_easy_cleanup(curl);
     curl_global_cleanup();
+    free(expected_statuses);
     free(method);
     free(payload);
     free(url);
@@ -885,17 +1000,38 @@ int main(int argc, char **argv) {
                         &body);
   }
 
+  bool expected_status_match = true;
+  if (expected_status_present && res == CURLE_OK) {
+    expected_status_match = status_matches(http_status, expected_statuses,
+                                           expected_status_count);
+    if (!expected_status_match) {
+      print_expected_status_error(method, url, expected_statuses,
+                                  expected_status_count, http_status);
+    }
+  }
+
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   curl_global_cleanup();
   free(body.data);
   header_list_free(&resp_headers.headers);
   free(resp_headers.status_line);
+  free(expected_statuses);
   free(method);
   free(payload);
   free(url);
   free(tokens);
   free(json);
+
+  if (expected_status_present) {
+    if (res != CURLE_OK) {
+      return EXIT_HTTP;
+    }
+    if (!expected_status_match) {
+      return EXIT_RESPONSE;
+    }
+    return EXIT_OK;
+  }
 
   if (!use_exit_codes) {
     return res == CURLE_OK ? EXIT_OK : EXIT_HTTP;
