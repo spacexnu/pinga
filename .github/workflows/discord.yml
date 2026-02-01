@@ -6,24 +6,16 @@ on:
   issues:
   issue_comment:
   release:
-  workflow_run:
-    workflows: ["*"]
-    types: [completed]
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
       - name: Send to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           curl -X POST "$DISCORD_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d '{
-              "content": "📦 Evento no repositório **'${{ github.repository }}'**\n\
-              • Event: **'${{ github.event_name }}'**\n\
-              • Author: **'${{ github.actor }}'**\n\
-              • Branch: **'${{ github.ref_name }}'**\n\
-              • Link: https://github.com/'${{ github.repository }}'"
-            }'
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+            -d "{\"content\":\"📦 Repository event ${{ github.repository }} | Event: ${{ github.event_name }} | Author: ${{ github.actor }} | Branch: ${{ github.ref_name }} | https://github.com/${{ github.repository }}\"}"
+
