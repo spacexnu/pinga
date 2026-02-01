@@ -6,6 +6,8 @@ on:
   issues:
   issue_comment:
   release:
+  create:
+  delete:
 
 jobs:
   notify:
@@ -14,8 +16,59 @@ jobs:
       - name: Send to Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref_name }}
+          MERGED: ${{ github.event.pull_request.merged }}
         run: |
+          STATUS=""
+
+          case "$EVENT_NAME" in
+            push)
+              STATUS="Push to repository"
+              ;;
+            pull_request)
+              if [ "$ACTION" = "opened" ]; then
+                STATUS="Pull Request opened"
+              elif [ "$ACTION" = "closed" ]; then
+                if [ "$MERGED" = "true" ]; then
+                  STATUS="Pull Request merged"
+                else
+                  STATUS="Pull Request closed"
+                fi
+              else
+                STATUS="Pull Request $ACTION"
+              fi
+              ;;
+            issues)
+              STATUS="Issue $ACTION"
+              ;;
+            issue_comment)
+              STATUS="Comment added"
+              ;;
+            release)
+              STATUS="Release $ACTION"
+              ;;
+            create)
+              STATUS="Branch created"
+              ;;
+            delete)
+              STATUS="Branch deleted"
+              ;;
+            *)
+              STATUS="Event: $EVENT_NAME"
+              ;;
+          esac
+
           curl -X POST "$DISCORD_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d "{\"content\":\"📦 Repository event ${{ github.repository }} | Event: ${{ github.event_name }} | Author: ${{ github.actor }} | Branch: ${{ github.ref_name }} | https://github.com/${{ github.repository }}\"}"
-
+            -d "{
+              \"content\": \"📦 **GitHub Event**\n\
+              **Status:** $STATUS\n\
+              **Repository:** $REPO\n\
+              **Author:** $ACTOR\n\
+              **Branch / Ref:** $REF\n\
+              **Link:** https://github.com/$REPO\"
+            }"
