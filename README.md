@@ -22,6 +22,7 @@ I’d rather drink a lot of pinga than open heavy tools like Postman._
 - Supports method, headers, query params, path params, and body
 - `payload` can be a string or any JSON value
 - `payload_file` lets you send body from a file
+- Optional `expected_status` validation for CI-friendly checks
 - JSON output: prints `status`, `headers`, and `body` (valid JSON for `jq`)
 - `--exclude-response-headers` prints only the raw response body
 - `--version` prints the CLI version
@@ -152,7 +153,7 @@ Exit codes:
 - `64` invalid config / JSON parsing error
 - `65` invalid request definition or CLI usage
 - `66` HTTP request execution failure (network, TLS, DNS, etc.)
-- `67` response validation failed (HTTP status >= 400 when using `--silent`; reserved for `expected_status`)
+- `67` response validation failed (`expected_status` mismatch, or HTTP status >= 400 when using `--silent` without `expected_status`)
 
 Config vs request errors:
 
@@ -210,6 +211,7 @@ Accepts `headers`, `query_params`, and `path_params` as object or array.
 | `path_params` | object or array | no | Map or list of `{name,value}` pairs |
 | `payload` | string or JSON | no | If JSON, the raw JSON is sent as body |
 | `payload_file` | string | no | File path to load body from (mutually exclusive with `payload`) |
+| `expected_status` | integer or array | no | If present, exit `67` on mismatch and print an error to stderr |
 
 ### Full example (object)
 
@@ -251,6 +253,26 @@ Accepts `headers`, `query_params`, and `path_params` as object or array.
 }
 ```
 
+### Expected status examples
+
+Single expected status:
+
+```json
+{ "url": "https://api.example.com/health", "method": "GET", "expected_status": 200 }
+```
+
+Multiple acceptable statuses:
+
+```json
+{
+  "url": "https://api.example.com/resource",
+  "method": "POST",
+  "expected_status": [200, 201]
+}
+```
+
+Response output behavior is unchanged; use `--silent` to suppress body output.
+
 ## Rules
 
 - `url` is required.
@@ -258,6 +280,7 @@ Accepts `headers`, `query_params`, and `path_params` as object or array.
 - `payload` accepts string or JSON (object/array/primitive). If JSON, the raw value is sent as-is.
 - `payload_file` is optional. If present, it sends the file contents as the body.
 - use only one of `payload` or `payload_file`.
+- `expected_status` accepts an integer or array of integers.
 - `headers`, `query_params`, `path_params` accept:
   - object: `{ "key": "value" }`
   - array: `[{ "name": "key", "value": "value" }]`
